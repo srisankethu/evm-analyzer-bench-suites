@@ -20,7 +20,7 @@ project_root_dir = code_root_dir.parent
 # Make relative loading work without relative import, which
 # doesn't work with main programs
 sys.path.insert(0, code_root_dir)
-from mythstuff import get_myth_prog, run_myth
+from analyserstuff import get_analyser_prog, run_analyser
 
 # Maximum time, in seconds, that we allow the analyzer to
 # take in analyzing a benchmark.
@@ -73,6 +73,8 @@ def gather_benchmark_files(root_dir, suite_name, benchmark_subdir):
 
 # TODO add json config lint function?
 @click.command()
+@click.option('--analyser', '-a', type=click.Choice(['Mythril', 'Manticore'],
+              help="Analyser to run the benchmarks.")
 @click.option('--suite', '-s', type=click.Choice(['Suhabe', 'nssc']),
               default='Suhabe',
               help="Benchmark suite to run; "
@@ -84,31 +86,29 @@ def gather_benchmark_files(root_dir, suite_name, benchmark_subdir):
               help="Maximum time allowed on any single benchmark.")
 @click.option('--files/--no-files', default=False,
               help="List files in benchmark and exit.")
-def run_benchmark_suite(suite, verbose, timeout, files):
-    """Run an analyzer (like Mythril) on a benchmark suite.
+def run_benchmark_suite(analyser, suite, verbose, timeout, files):
+    """Run an analyzer on a benchmark suite.
 
-    If you set environment variable MYTH, that will be used a the myth CLI command to
-    invoke. If that is not set, we run using "myth".
+    If you set environment variable, that will be used as a CLI command to
+    invoke..
     """
-    analyzer = 'Mythril'
 
-    if analyzer == 'Mythril':
-        analyzer_prog, myth_version = get_myth_prog()
-        if not analyzer_prog:
-            sys.exit(1)
-            pass
-        print("Using {} {}".format(analyzer, myth_version))
+    analyzer_prog, analyser_version = get_analyser_prog()
+    if not analyser_prog:
+        sys.exit(1)
         pass
+    print("Using {} {}".format(analyser, analyser_version))
+    pass
 
     debug = verbose == 2
-    testsuite_conf = get_benchmark_yaml(project_root_dir, suite, analyzer, debug)
+    testsuite_conf = get_benchmark_yaml(project_root_dir, suite, analyser, debug)
     benchmark_files = gather_benchmark_files(code_root_dir, suite,
                                              testsuite_conf['benchmark_subdir'])
 
     out_data = {
-        'analyzer': analyzer,
+        'analyser': analyser,
         'date': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()),
-        'mythril_version': myth_version,
+        'analyser_version': analyser_version,
         'suite': testsuite_conf['suite'],
     }
 
@@ -163,11 +163,16 @@ def run_benchmark_suite(suite, verbose, timeout, files):
                 continue
 
         # FIXME: expand to other analyzers
-        cmd = [analyzer_prog, '-x', '-o', 'json', '{}'.format(sol_file)]
+        if analyser_prog == "myth":
+            cmd = [analyser_prog, '-x', '-o', 'json', '{}'.format(sol_file)]
+        elif analyser_prog == "manticore":
+            cmd = [analyser_prog, '--detect-all', '{}'.format(sol_file)]
+
+
         if verbose:
             print(' '.join(cmd))
 
-        elapsed, s = run_myth(analyzer_prog, sol_file, debug, timeout)
+        elapsed, s = run_analyser(analyser_prog, sol_file, debug, timeout)
         elapsed_str = secs_to_human(elapsed)
         bench_data['elapsed'] = elapsed
         bench_data['elapsed_str'] = elapsed_str
@@ -184,8 +189,8 @@ def run_benchmark_suite(suite, verbose, timeout, files):
 
         bench_data['execution_returncode'] = s.returncode
         if s.returncode != 0:
-            print("mythril invocation:\n\t{}\n failed with return code {}"
-                  .format(' '.join(cmd), s.returncode))
+            print("{} invocation:\n\t{}\n failed with return code {}"
+                  .format(analyser, ' '.join(cmd), s.returncode))
             invalid_execution += 1
             bench_data['elapsed_str'] = 'errored'
             bench_data['result'] = 'Errored'
@@ -297,7 +302,7 @@ def run_benchmark_suite(suite, verbose, timeout, files):
 
     benchdir = code_root_dir.parent / 'benchdata' / suite
     os.makedirs(benchdir, exist_ok=True)
-    with open(benchdir / (analyzer + '.yaml'), 'w') as fp:
+    with open(benchdir / (analyser + '.yaml'), 'w') as fp:
         yaml.dump(out_data, fp)
 
 
